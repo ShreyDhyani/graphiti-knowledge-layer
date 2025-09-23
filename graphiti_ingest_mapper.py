@@ -26,8 +26,7 @@ from datetime import datetime, timezone
 from typing import List, Tuple
 from graphiti_client import get_graphiti
 from utils.retry_async import retry_async
-
-
+from ingest_utils import ingest_models_as_episodes
 from model import Circular, Clause
 
 # Graphiti imports
@@ -104,41 +103,6 @@ def map_normalized_to_models(normalized: dict) -> Tuple[Circular, List[Clause]]:
         clauses.append(clause)
 
     return circ, clauses
-
-_retry_add_episode = retry_async(max_retries=6, initial_delay=0.5, max_delay=30.0)
-
-async def ingest_models_as_episodes(graphiti: Graphiti, circular: Circular, clauses: List[Clause]):
-    """Ingest circular metadata as one episode and each clause as its own episode.
-    Graphiti's extraction pipeline (LLM/embedder) will then run and create entities/edges.
-    """
-    # ingest a summary/metadata episode for the circular
-    meta_text = f"CIRCULAR METADATA:\nTitle: {circular.title}\nSource File: {circular.source_file}\nPages: {circular.pages}\n"
-    meta_text += f"Full text (first 2000 chars):\n{(circular.full_text or '')[:2000]}\n"
-
-    @ _retry_add_episode
-    async def _add_meta():
-        await graphiti.add_episode(
-            name=f"circular_meta_{circular.id}",
-            episode_body=meta_text,
-            source=EpisodeType.text,
-            source_description=f"circular metadata {circular.source_file}",
-            reference_time=datetime.now(timezone.utc),
-        )
-    await _add_meta()
-
-    # ingest each clause as its own episode
-    for i, cl in enumerate(clauses):
-        @ _retry_add_episode
-        async def _add_clause():
-            await graphiti.add_episode(
-                name=f"{circular.id}_clause_{i}",
-                episode_body=cl.text or "",
-                source=EpisodeType.text,
-                source_description=f"{circular.source_file} chunk {i}",
-                reference_time=datetime.now(timezone.utc),
-            )
-        await _add_clause()
-
 
 async def main(ingest: bool = False):
     # Only process normalized source files, avoid mapped outputs

@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import os
+import shutil
 import sys
 
 # ensure project folder is on path if running from elsewhere
@@ -17,8 +18,22 @@ from graphiti_ingest_mapper import main as mapper_main  # async
 try:
     from graphiti_client import get_graphiti
 except Exception:
-    # If graphiti_client isn't present yet, we'll skip pre-check and let mapper fail later.
     get_graphiti = None
+
+
+def clean_dirs():
+    """Remove previous pipeline output directories to start fresh."""
+    to_remove = ["extracted_text", "normalized", os.path.join("normalized", "mapped_outputs")]
+    for p in to_remove:
+        if os.path.exists(p):
+            try:
+                if os.path.isdir(p):
+                    shutil.rmtree(p)
+                else:
+                    os.remove(p)
+                print(f"Removed: {p}")
+            except Exception as e:
+                print(f"Warning: failed to remove {p}: {e}")
 
 
 def run_extraction():
@@ -37,14 +52,10 @@ async def run_mapping(ingest: bool):
     print("3/4 — Running mapping and optional ingestion...")
 
     # If ingest requested, do a quick config validation by initializing Graphiti here.
-    # This helps surface missing env vars (GOOGLE_API_KEY / OPENAI_API_KEY / NEO4J_*) early.
     if ingest and get_graphiti is not None:
         print("  -> Validating Graphiti configuration...")
         try:
-            # get_graphiti will raise if required env vars are missing or invalid.
             client = get_graphiti()
-            # If it returns an instance, we can optionally close it or let mapper create its own.
-            # We won't reuse this instance here; this is just a validation step.
             print("  -> Graphiti client validated.")
         except Exception as e:
             print("ERROR: Graphiti client validation failed:", str(e))
@@ -58,7 +69,14 @@ async def run_mapping(ingest: bool):
 def main():
     parser = argparse.ArgumentParser(description="Run full pipeline: extract -> normalize -> map -> (optional) ingest")
     parser.add_argument("--ingest", action="store_true", help="Also ingest mapped data into Graphiti (needs env vars)")
+    parser.add_argument("--clean", action="store_true", help="Remove previous extracted/normalized data before running")
     args = parser.parse_args()
+
+    if args.clean:
+        print("Cleaning previous outputs...")
+        clean_dirs()
+        print("Clean complete.\n")
+        exit()
 
     run_extraction()
     run_normalization()
