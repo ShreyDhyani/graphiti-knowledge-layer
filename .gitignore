@@ -1,1 +1,6 @@
 .env
+extracted_text
+normalized
+pdfs
+__pycache__
+reserve
