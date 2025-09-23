@@ -22,16 +22,13 @@ from __future__ import annotations
 import os
 import json
 import argparse
-from datetime import datetime, timezone
 from typing import List, Tuple
 from utils.graphiti_client import get_graphiti
-from utils.retry_async import retry_async
 from utils.ingest_utils import ingest_models_as_episodes
 from utils.model import Circular, Clause
 
 # Graphiti imports
 from graphiti_core import Graphiti
-from graphiti_core.nodes import EpisodeType
 
 # Simple chunker used when normalized JSON contains a single large text block
 CHUNK_SIZE = 3000
