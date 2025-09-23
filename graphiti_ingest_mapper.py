@@ -24,10 +24,10 @@ import json
 import argparse
 from datetime import datetime, timezone
 from typing import List, Tuple
-from graphiti_client import get_graphiti
+from utils.graphiti_client import get_graphiti
 from utils.retry_async import retry_async
-from ingest_utils import ingest_models_as_episodes
-from model import Circular, Clause
+from utils.ingest_utils import ingest_models_as_episodes
+from utils.model import Circular, Clause
 
 # Graphiti imports
 from graphiti_core import Graphiti
