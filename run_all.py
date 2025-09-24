@@ -10,13 +10,13 @@ PROJECT_DIR = os.path.dirname(__file__)
 sys.path.insert(0, PROJECT_DIR)
 
 # import the functions from the other scripts
-from pdf_extract import process_all as pdf_extract_all
-from normalize_pdfs import main as normalize_main
+from utils.pdf_extract import process_all as pdf_extract_all
+from utils.normalize_pdfs import main as normalize_main
 from graphiti_ingest_mapper import main as mapper_main  # async
 
 # Optional: pre-check Graphiti client if doing ingestion
 try:
-    from graphiti_client import get_graphiti
+    from utils.graphiti_client import get_graphiti
 except Exception:
     get_graphiti = None
 
