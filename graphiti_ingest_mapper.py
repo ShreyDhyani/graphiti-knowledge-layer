@@ -26,38 +26,17 @@ from typing import List, Tuple
 from utils.graphiti_client import get_graphiti
 from utils.ingest_utils import ingest_models_as_episodes
 from utils.model import Circular, Clause
+from utils.chuking_utils.semchunk_wrapper import smart_chunk_text
+# from utils.chuking_utils.chunk_text import chunk_text
+# from utils.chuking_utils.sliding_chunk_text import sliding_chunk_text
 
 # Graphiti imports
 from graphiti_core import Graphiti
-
-# Simple chunker used when normalized JSON contains a single large text block
-CHUNK_SIZE = 3000
 
 
 def load_normalized_json(path: str) -> dict:
     with open(path, 'r', encoding='utf-8') as fh:
         return json.load(fh)
-
-
-def chunk_text(text: str, chunk_chars: int = CHUNK_SIZE) -> List[str]:
-    text = (text or '').strip()
-    if not text:
-        return []
-    chunks = []
-    i = 0
-    L = len(text)
-    while i < L:
-        end = min(i + chunk_chars, L)
-        # try to not split mid-sentence: extend to next newline/period within 200 chars
-        lookahead = text[end:min(end+200, L)]
-        if lookahead:
-            import re
-            m = re.search(r'[\n\.]\s', lookahead)
-            if m:
-                end += m.end()
-        chunks.append(text[i:end].strip())
-        i = end
-    return chunks
 
 
 def map_normalized_to_models(normalized: dict) -> Tuple[Circular, List[Clause]]:
@@ -83,7 +62,18 @@ def map_normalized_to_models(normalized: dict) -> Tuple[Circular, List[Clause]]:
     # Example: TODO: extract_orgs_and_people(normalized) -> List[Organization], List[Person]
 
     # If the normalized JSON already includes explicit chunks, use those
-    chunks = normalized.get('chunks') or chunk_text(full_text)
+    
+    # this is normal token based chunking
+    # chunks = normalized.get('chunks') or chunk_text(full_text)
+    # This is for sliding window based chunking
+    # chunks = normalized.get('chunks') or sliding_chunk_text(full_text)
+
+    chunks = normalized.get('chunks') or smart_chunk_text(
+        full_text,
+        chunk_size_tokens=90,   # tune
+        overlap=0.15,            # ~15% overlap for context carry-over
+        tokenizer="cl100k_base"           # None / "cl100k_base" / "isaacus/kanon-tokenizer"
+    )
 
     clauses: List[Clause] = []
     for i, ch in enumerate(chunks):
@@ -117,14 +107,14 @@ async def main(ingest: bool = False):
     # If ingest flag set, initialize Graphiti using env creds
     graphiti = None
     if ingest:
-        uri = os.getenv('NEO4J_URI', 'bolt://localhost:7687')
-        user = os.getenv('NEO4J_USER', 'neo4j')
-        pwd = os.getenv('NEO4J_PASSWORD', 'password')
         # Create Graphiti instance (this uses your graphiti_client pattern or direct init)
         try:
             graphiti = get_graphiti()
         except Exception:
             # Fallback to direct init if graphiti_client missing
+            uri = os.getenv('NEO4J_URI', 'bolt://localhost:7687')
+            user = os.getenv('NEO4J_USER', 'neo4j')
+            pwd = os.getenv('NEO4J_PASSWORD', 'password')
             graphiti = Graphiti(uri, user, pwd)
 
     for fname in files:
