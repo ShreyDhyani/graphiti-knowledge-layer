@@ -24,7 +24,6 @@ from pydantic import BaseModel, Field
 def _new_id() -> str:
     return str(uuid.uuid4())
 
-
 class BaseEntity(BaseModel):
     id: str = Field(default_factory=_new_id)
     # free-form metadata for provenance (source file, page, chunk id, etc.)

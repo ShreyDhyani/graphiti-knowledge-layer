@@ -70,10 +70,9 @@ except Exception:
 
 # Optional local embedder
 try:
-    from utils.local_embedder import LocalEmbedder
+    from utils.local_embedder import LocalEmbedderClient
 except Exception:
-    LocalEmbedder = None
-
+    LocalEmbedderClient = None
 
 def _bool_env(name: str, default: bool = False) -> bool:
     v = os.getenv(name)
@@ -115,10 +114,10 @@ def get_graphiti(
 
     # Local embedder branch (explicit or via provider=local)
     if use_local_embedder or provider == "local":
-        if LocalEmbedder is None:
-            raise RuntimeError("LocalEmbedder not available. Install sentence-transformers and ensure utils/local_embedder.py exists.")
+        if LocalEmbedderClient is None:
+            raise RuntimeError("LocalEmbedderClient not available. Install sentence-transformers and ensure utils/local_embedder.py exists.")
         model_name = os.getenv("LOCAL_EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        embedder = LocalEmbedder(model_name=model_name)
+        embedder = LocalEmbedderClient(model_name=model_name)
 
         # If LLM not disabled, try wiring provider LLM (Gemini preferred)
         if not disable_llm:
