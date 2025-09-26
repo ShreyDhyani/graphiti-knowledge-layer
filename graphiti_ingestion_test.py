@@ -56,7 +56,7 @@ async def main():
         print("✅ Adding Episode")
         await graphiti.add_episode(
             name="dummy_test_1",
-            episode_body="Alice works at Acme Corp since 2021.",
+            episode_body="Bob works at ABC since 2019.",
             source=EpisodeType.text,
             source_description="unit test",
             reference_time=datetime.now(timezone.utc),
@@ -66,6 +66,7 @@ async def main():
         # 2) Run a simple search (hybrid search)
         results = await graphiti.search("Who works at Acme?")
         print(f"Found {len(results)} results")
+        print(f"Result is {results}")
         for r in results:
             print("----")
             print("content:", getattr(r, "content", None))
@@ -79,7 +80,7 @@ async def main():
         else:
             close = getattr(graphiti, "close", None)
             if callable(close):
-                close()
+                await close()
 
 
 if __name__ == "__main__":

@@ -92,15 +92,15 @@ def get_graphiti(
     Create and return a configured Graphiti instance.
 
     Controls via env:
-      - GRAPHITI_PROVIDER (gemini | openai | local)  default: gemini
+      - GRAPHITI_PROVIDER (gemini | openai | local)   default: gemini
       - USE_LOCAL_EMBEDDER (true/false)               default: false
       - DISABLE_LLM (true/false)                      default: false
       - GOOGLE_API_KEY / OPENAI_API_KEY                as needed by provider
       - LOCAL_EMBED_MODEL (optional)                   model name for local embedder
     """
-    uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    user = user or os.getenv("NEO4J_USER", "neo4j")
-    pwd = pwd or os.getenv("NEO4J_PASSWORD", "neo4j")
+    uri = uri or os.getenv("NEO4J_URI")
+    user = user or os.getenv("NEO4J_USER")
+    pwd = pwd or os.getenv("NEO4J_PASSWORD")
 
     provider = os.getenv("GRAPHITI_PROVIDER", "gemini").lower()
     if use_local_embedder is None:

@@ -109,6 +109,7 @@ async def main(ingest: bool = False):
     if ingest:
         # Create Graphiti instance (this uses your graphiti_client pattern or direct init)
         try:
+            print(f" Custom Graphiti client created !!");
             graphiti = get_graphiti()
         except Exception:
             # Fallback to direct init if graphiti_client missing
@@ -152,9 +153,9 @@ async def main(ingest: bool = False):
         # ingest only if requested and mapping succeeded
         if ingest and graphiti:
             try:
-                print(' Ingesting into Graphiti...')
+                print('Ingesting into Graphiti...')
                 await ingest_models_as_episodes(graphiti, circ, clauses)
-                print(' Ingest complete for', fname)
+                print('Ingest complete for', fname)
             except Exception as e:
                 print(f" Ingest failed for {fname}: {e}")
                 # don't raise — continue with next file
