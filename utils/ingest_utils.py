@@ -146,6 +146,7 @@ async def ingest_models_as_episodes(graphiti: Any, circular: Any, clauses: List[
                 reference_time=datetime.now(timezone.utc),
             )
 
+
     try:
         await _add_meta()
         consecutive_failures = 0
@@ -160,6 +161,7 @@ async def ingest_models_as_episodes(graphiti: Any, circular: Any, clauses: List[
         @_retry_add_episode
         async def _add_clause(ci=i, clause=cl):
             async with _sem:
+                print(f"Adding Episode using _add_clause {getattr(circular, 'id', 'unknown')}_clause_{ci}")
                 await graphiti.add_episode(
                     name=f"{getattr(circular, 'id', 'unknown')}_clause_{ci}",
                     episode_body=getattr(clause, 'text', '') or "",
