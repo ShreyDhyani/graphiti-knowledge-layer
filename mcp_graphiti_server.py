@@ -157,4 +157,4 @@ async def graphiti_search(
     except Exception as e:
         raise HTTPException(500, f"Graphiti search failed: {e}")
 
-    return {"results": [facts_only]}
+    return {"results": facts_only}
