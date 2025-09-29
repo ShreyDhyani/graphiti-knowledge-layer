@@ -2,6 +2,8 @@
 import os
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
+import asyncio
+from utils.graphiti_client import get_graphiti 
 
 load_dotenv()
 
@@ -49,33 +51,36 @@ INDEX_QUERIES = [
 ]
 
 
-def setup_indexes():
-    with driver.session() as session:
-        for query in INDEX_QUERIES:
-            try:
-                session.run(query)
-                print(f"✅ Executed: {query.strip().splitlines()[0]} ...")
-            except Exception as e:
-                print(f"⚠️  Failed on query: {query}\n   {e}")
+# def setup_indexes():
+#     with driver.session() as session:
+#         for query in INDEX_QUERIES:
+#             try:
+#                 session.run(query)
+#                 print(f"✅ Executed: {query.strip().splitlines()[0]} ...")
+#             except Exception as e:
+#                 print(f"⚠️  Failed on query: {query}\n   {e}")
 
-def seed_test_data():
-    with driver.session() as session:
-        session.run("""
-        MERGE (n:Node {uuid: "test-node"})
-        SET n.name = "Test Node", n.summary = "This is a seeded test node"
-        """)
-        session.run("""
-        MERGE (e:Episodic {uuid: "test-episode"})
-        SET e.name = "Test Episode",
-            e.content = "Alice works at Acme Corp since 2021.",
-            e.summary = "Employment test",
-            e.created_at = datetime()
-        """)
-        print("✅ Seeded test node + episode")
+# def seed_test_data():
+#     with driver.session() as session:
+#         session.run("""
+#         MERGE (n:Node {uuid: "test-node"})
+#         SET n.name = "Test Node", n.summary = "This is a seeded test node"
+#         """)
+#         session.run("""
+#         MERGE (e:Episodic {uuid: "test-episode"})
+#         SET e.name = "Test Episode",
+#             e.content = "Alice works at Acme Corp since 2021.",
+#             e.summary = "Employment test",
+#             e.created_at = datetime()
+#         """)
+#         print("✅ Seeded test node + episode")
 
 if __name__ == "__main__":
     print("🚀 Setting up Neo4j schema for Graphiti...")
-    setup_indexes()
-    seed_test_data()
+    client = get_graphiti()
+    asyncio.run(client.build_indices_and_constraints())
+
+    # setup_indexes()
+    # seed_test_data()
     print("🎉 Setup complete.")
     driver.close()
