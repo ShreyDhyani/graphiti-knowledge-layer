@@ -22,74 +22,15 @@ from __future__ import annotations
 import os
 import json
 import argparse
-from typing import List, Tuple
 from utils.graphiti_client import get_graphiti
 from utils.ingest_utils import ingest_models_as_episodes
-from utils.model import Circular, Clause
-from utils.chuking_utils.semchunk_wrapper import smart_chunk_text
-# from utils.chuking_utils.chunk_text import chunk_text
-# from utils.chuking_utils.sliding_chunk_text import sliding_chunk_text
-
+from utils.normalisation_utils.map_normalized_to_models import map_normalized_to_models_func
 # Graphiti imports
 from graphiti_core import Graphiti
-
 
 def load_normalized_json(path: str) -> dict:
     with open(path, 'r', encoding='utf-8') as fh:
         return json.load(fh)
-
-
-def map_normalized_to_models(normalized: dict) -> Tuple[Circular, List[Clause]]:
-    meta = normalized.get('metadata', {})
-    full_text = normalized.get('normalized_text') or normalized.get('full_text') or ''
-
-    circ = Circular(
-        circular_number=meta.get('title') or meta.get('filename'),
-        title=meta.get('title'),
-        summary=None,
-        full_text=full_text,
-        issued_date=None,
-        issued_by=None,
-        source_file=meta.get('filename'),
-        pages=meta.get('page_count'),
-        metadata={
-            'normalized_at': meta.get('normalized_at'),
-            'original_filename': meta.get('filename')
-        }
-    )
-    # TODO(B): run heuristic/regex extractors here to pre-populate
-    # Organization / Person entities (e.g. extract issuer, signatory)
-    # Example: TODO: extract_orgs_and_people(normalized) -> List[Organization], List[Person]
-
-    # If the normalized JSON already includes explicit chunks, use those
-    
-    # this is normal token based chunking
-    # chunks = normalized.get('chunks') or chunk_text(full_text)
-    # This is for sliding window based chunking
-    # chunks = normalized.get('chunks') or sliding_chunk_text(full_text)
-
-    chunks = normalized.get('chunks') or smart_chunk_text(
-        full_text,
-        chunk_size_tokens=90,   # tune
-        overlap=0.15,            # ~15% overlap for context carry-over
-        tokenizer="cl100k_base"           # None / "cl100k_base" / "isaacus/kanon-tokenizer"
-    )
-
-    clauses: List[Clause] = []
-    for i, ch in enumerate(chunks):
-        clause = Clause(
-            circular_id=circ.id,
-            clause_number=str(i),
-            text=ch,
-            page_ref=None,
-            metadata={
-                'source_file': meta.get('filename'),
-                'chunk_index': i,
-            }
-        )
-        clauses.append(clause)
-
-    return circ, clauses
 
 async def main(ingest: bool = False):
     # Only process normalized source files, avoid mapped outputs
@@ -134,7 +75,7 @@ async def main(ingest: bool = False):
 
         # map to models; catch mapping errors and continue with next file
         try:
-            circ, clauses = map_normalized_to_models(norm)
+            circ, clauses = map_normalized_to_models_func(norm)
         except Exception as e:
             print(f" Error mapping {fname}: {e} — skipping file")
             continue
