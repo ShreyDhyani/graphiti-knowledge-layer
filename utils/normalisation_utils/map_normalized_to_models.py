@@ -3,6 +3,7 @@ from typing import List, Tuple
 import traceback
 from ..model import Circular, Clause
 from ..chuking_utils.semchunk_wrapper import smart_chunk_text
+from ..chuking_utils.num_tokens_from_string import num_tokens_from_string
 
 def _fallback_chunk_text(text: str, chunk_chars: int = 3000) -> List[str]:
     text = (text or "").strip()
@@ -130,7 +131,8 @@ def map_normalized_to_models_func(normalized: dict) -> Tuple[Circular, List[Clau
                 overlap=0.15,           # ~15% overlap
                 tokenizer="cl100k_base"
             ) or []
-            print(f"[mapper] semchunk produced {len(chunks)} chunks")
+            token_length = num_tokens_from_string("tiktoken is great!", "cl100k_base")
+            print(f"[mapper] semchunk produced {len(chunks)} chunks  token_length => ${token_length}")
         except Exception:
             print("[mapper] semchunk failed; falling back to naive chunker")
             traceback.print_exc()
