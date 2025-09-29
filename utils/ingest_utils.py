@@ -133,6 +133,9 @@ async def ingest_models_as_episodes(graphiti: Any, circular: Any, clauses: List[
     )
 
     consecutive_failures = 0
+    n_total = len(clauses)
+    n_ok = 0
+    n_fail = 0
 
     # add meta episode
     @_retry_add_episode
@@ -161,6 +164,7 @@ async def ingest_models_as_episodes(graphiti: Any, circular: Any, clauses: List[
         @_retry_add_episode
         async def _add_clause(ci=i, clause=cl):
             async with _sem:
+                print(f"Ingesting {ci+1}/{n_total} chunk")
                 print(f"Adding Episode using _add_clause {getattr(circular, 'id', 'unknown')}_clause_{ci}")
                 await graphiti.add_episode(
                     name=f"{getattr(circular, 'id', 'unknown')}_clause_{ci}",
@@ -173,8 +177,11 @@ async def ingest_models_as_episodes(graphiti: Any, circular: Any, clauses: List[
         try:
             await _add_clause()
             consecutive_failures = 0
+            n_ok += 1
+            print(f"✅ Ingested {i+1}/{n_total}")
         except Exception as e:
             consecutive_failures += 1
+            n_fail += 1
             log.error("Ingest failed for clause %d of circular %s: %s", i, getattr(circular, 'id', 'unknown'), e)
             await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
 
@@ -183,4 +190,5 @@ async def ingest_models_as_episodes(graphiti: Any, circular: Any, clauses: List[
                 await asyncio.sleep(LONG_BACKOFF_SECONDS)
                 consecutive_failures = 0
 
+    print(f"Done. ✅ {n_ok}/{n_total} ingested, ❌ {n_fail} failed.")
     log.info("Ingestion attempted for circular %s complete.", getattr(circular, 'id', 'unknown'))
