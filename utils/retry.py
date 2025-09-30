@@ -82,4 +82,4 @@ def retry_async(
 
 
 # default decorator instance (import if you want module defaults)
-default_retry = retry_async(max_retries=6, initial_delay=0.5, max_delay=30.0)
+default_retry = retry_async(max_retries=2, initial_delay=30.0, max_delay=30.0)
