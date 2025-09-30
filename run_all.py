@@ -4,7 +4,11 @@ import asyncio
 import os
 import shutil
 import sys
+# import logging
 
+# logging.basicConfig(
+#     level=logging.DEBUG,  # 👈 show debug logs
+# )
 # ensure project folder is on path if running from elsewhere
 PROJECT_DIR = os.path.dirname(__file__)
 sys.path.insert(0, PROJECT_DIR)

@@ -7,7 +7,6 @@ import os
 import json
 from datetime import datetime, timezone
 from typing import Any, List
-
 from graphiti_core.nodes import EpisodeType
 from dotenv import load_dotenv
 
@@ -38,7 +37,7 @@ except Exception:
 
 
 # Tunables — environment-configurable
-SEMAPHORE_MAX = int(os.getenv("INGEST_SEMAPHORE_MAX", "1"))
+SEMAPHORE_MAX = int(os.getenv("INGEST_SEMAPHORE_MAX", "10"))
 MAX_CONSECUTIVE_FAILURES = int(os.getenv("INGEST_MAX_CONSECUTIVE_FAILURES", "3"))
 LONG_BACKOFF_SECONDS = int(os.getenv("INGEST_LONG_BACKOFF_SECONDS", str(60 * 5)))
 
@@ -62,14 +61,9 @@ async def ingest_models_as_episodes(
     - semaphore: optional asyncio.Semaphore to throttle Graphiti calls (defaults to module semaphore)
     - retry_decorator: optional retry decorator (defaults to utils.retry.default_retry)
     """
-    if persist_failure_fn is None:
-        persist_failure_fn = _imported_default_persist_failure
-
-    if semaphore is None:
-        semaphore = _sem
-
-    if retry_decorator is None:
-        retry_decorator = default_retry
+    persist_failure_fn = _imported_default_persist_failure
+    semaphore = _sem
+    retry_decorator = default_retry
 
     meta_text = (
         f"CIRCULAR METADATA:\n"
@@ -102,7 +96,11 @@ async def ingest_models_as_episodes(
     except Exception as e:
         log.error("Meta episode ingestion failed: %s", e)
         consecutive_failures += 1
-        await persist_failure_fn(circular, clauses, f"meta_episode_failed: {e}")
+        try:
+            await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
+        except Exception as pf_exc:
+            log.exception("persist_failure_fn failed while handling clause %d error: %s", i, pf_exc)
+        
 
     # Bulk path: prefer clause_ingest.add_clause_episode_in_bulk if available
     bulk_done = False
@@ -110,13 +108,16 @@ async def ingest_models_as_episodes(
         bulk_helper = getattr(_clause_ingest, "add_clause_episode_in_bulk", None)
         if callable(bulk_helper):
             try:
-                await bulk_helper(graphiti=graphiti, circular=circular, clauses=clauses, sem=semaphore, retry_decorator=retry_decorator)
+                await bulk_helper(graphiti=graphiti, circular=circular, clauses=clauses, sem=semaphore)
                 n_ok = n_total
                 bulk_done = True
                 log.info("Bulk helper succeeded for circular %s", getattr(circular, "id", "unknown"))
             except Exception as e:
                 log.error("Bulk helper failed: %s", e)
-                await persist_failure_fn(circular, clauses, f"bulk_helper_failed: {e}")
+                try:
+                    await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
+                except Exception as pf_exc:
+                    log.exception("persist_failure_fn failed while handling clause %d error: %s", i, pf_exc)
                 # fall through to fallback behavior
         else:
             # try graphiti.add_episode_bulk (build payloads then call)
@@ -151,7 +152,10 @@ async def ingest_models_as_episodes(
                     log.info("Bulk ingestion via graphiti.add_episode_bulk succeeded for circular %s", getattr(circular, "id", "unknown"))
                 except Exception as e:
                     log.error("graphiti.add_episode_bulk failed: %s", e)
-                    await persist_failure_fn(circular, clauses, f"add_episode_bulk_failed: {e}")
+                    try:
+                        await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
+                    except Exception as pf_exc:
+                        log.exception("persist_failure_fn failed while handling clause %d error: %s", i, pf_exc)
                     # fall through to sequential ingestion
             else:
                 log.warning("Bulk requested but no bulk helper and graphiti.add_episode_bulk missing — will use per-clause ingestion.")
@@ -160,7 +164,7 @@ async def ingest_models_as_episodes(
     if not bulk_done:
         for i, cl in enumerate(clauses):
             try:
-                await add_clause_episode(graphiti, circular, cl, i, semaphore, retry_decorator)
+                await add_clause_episode(graphiti, circular, cl, i, semaphore)
                 consecutive_failures = 0
                 n_ok += 1
                 log.info("Ingested %d/%d", n_ok, n_total)
@@ -168,7 +172,10 @@ async def ingest_models_as_episodes(
                 consecutive_failures += 1
                 n_fail += 1
                 log.error("Ingest failed for clause %d of circular %s: %s", i, getattr(circular, "id", "unknown"), e)
-                await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
+                try:
+                    await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
+                except Exception as pf_exc:
+                    log.exception("persist_failure_fn failed while handling clause %d error: %s", i, pf_exc)
 
                 if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                     log.warning("Detected %d consecutive failures — pausing for %ds", consecutive_failures, LONG_BACKOFF_SECONDS)
