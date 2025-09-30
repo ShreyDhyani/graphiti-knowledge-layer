@@ -16,13 +16,11 @@ from __future__ import annotations
 import os
 import json
 import argparse
-import inspect
 from utils.graphiti_client import get_graphiti
 from utils.ingest_utils import ingest_models_as_episodes
 from utils.normalisation_utils.map_normalized_to_models import map_normalized_to_models_func
 # Graphiti imports
 from graphiti_core import Graphiti
-
 
 def load_normalized_json(path: str) -> dict:
     with open(path, 'r', encoding='utf-8') as fh:
@@ -104,11 +102,7 @@ async def main(ingest: bool = False, bulk: bool = False):
             try:
                 print('Ingesting into Graphiti...')
                 # If ingest_models_as_episodes supports `bulk`, forward the kwarg; otherwise fall back
-                sig = inspect.signature(ingest_models_as_episodes)
-                if 'bulk' in sig.parameters:
-                    await ingest_models_as_episodes(graphiti, circ, clauses, bulk=bulk)
-                else:
-                    await ingest_models_as_episodes(graphiti, circ, clauses)
+                await ingest_models_as_episodes(graphiti, circ, clauses, bulk=bulk)
                 print('Ingest complete for', fname)
             except Exception as e:
                 print(f" Ingest failed for {fname}: {e}")
