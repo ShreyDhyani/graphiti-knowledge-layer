@@ -32,8 +32,8 @@ log = logging.getLogger(__name__)
 
 # Tunables — environment-configurable
 SEMAPHORE_MAX = int(os.getenv("INGEST_SEMAPHORE_MAX", "10"))
-MAX_CONSECUTIVE_FAILURES = int(os.getenv("INGEST_MAX_CONSECUTIVE_FAILURES", "3"))
-LONG_BACKOFF_SECONDS = int(os.getenv("INGEST_LONG_BACKOFF_SECONDS", str(60 * 5)))
+MAX_CONSECUTIVE_FAILURES = int(os.getenv("INGEST_MAX_CONSECUTIVE_FAILURES", "2"))
+LONG_BACKOFF_SECONDS = int(os.getenv("INGEST_LONG_BACKOFF_SECONDS", str(60 * 1)))
 
 _sem = asyncio.Semaphore(SEMAPHORE_MAX)
 
@@ -161,20 +161,22 @@ async def ingest_models_as_episodes(
                 await add_clause_episode(graphiti, circular, cl, i, semaphore)
                 consecutive_failures = 0
                 n_ok += 1
+                print(f"Ingested {n_ok}/{n_total}")
                 log.info("Ingested %d/%d", n_ok, n_total)
             except Exception as e:
                 consecutive_failures += 1
                 n_fail += 1
+                print(f"Ingest failed for clause %d of circular %s: %s", i, getattr(circular, "id", "unknown"), e)
                 log.error("Ingest failed for clause %d of circular %s: %s", i, getattr(circular, "id", "unknown"), e)
                 try:
                     await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
                 except Exception as pf_exc:
                     log.exception("persist_failure_fn failed while handling clause %d error: %s", i, pf_exc)
 
-                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-                    log.warning("Detected %d consecutive failures — pausing for %ds", consecutive_failures, LONG_BACKOFF_SECONDS)
-                    await asyncio.sleep(LONG_BACKOFF_SECONDS)
-                    consecutive_failures = 0
+                # if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                #     log.warning("Detected %d consecutive failures — pausing for %ds", consecutive_failures, LONG_BACKOFF_SECONDS)
+                #     await asyncio.sleep(LONG_BACKOFF_SECONDS)
+                #     consecutive_failures = 0
 
     log.info("Done. %d/%d ingested, %d failed.", n_ok, n_total, n_fail)
     log.info("Ingestion attempted for circular %s complete.", getattr(circular, "id", "unknown"))

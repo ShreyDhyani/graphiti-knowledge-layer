@@ -51,8 +51,8 @@ async def add_clause_episode(
     async def _do_add():
         async with sem:
             name = f"{getattr(circular, 'id', 'unknown')}_clause_{index}"
+            print(f"✅ Started Adding Episode {name}")
             body = getattr(clause, "text", "") or ""
-
             start_time = datetime.now()
 
             await graphiti.add_episode(
