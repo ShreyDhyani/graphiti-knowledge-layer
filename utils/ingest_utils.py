@@ -1,128 +1,75 @@
-"""
-ingest_utils.py
-
-Contains a robust, reusable ingestion helper and retry decorator for Graphiti episode ingestion.
-Intended to be imported and used by graphiti_ingest_mapper.py:
-
-from ingest_utils import ingest_models_as_episodes, retry_async
-
-Features:
-- async retry_async decorator with exponential backoff + jitter
-- ingest_models_as_episodes(graphiti, circular, clauses) function
-  * concurrency throttling via asyncio.Semaphore
-  * per-episode retry via decorator (configurable)
-  * failure persistence into `failed/`
-  * circuit-break pause on repeated failures
-
-Adjust SEMAPHORE_MAX / MAX_CONSECUTIVE_FAILURES / LONG_BACKOFF_SECONDS to tune behavior.
-"""
+# ingest_utils.py
 from __future__ import annotations
 
 import asyncio
-import random
 import logging
 import os
 import json
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, List
-from graphiti_core.nodes import EpisodeType
+from typing import Any, List
 
+from graphiti_core.nodes import EpisodeType
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# clause helpers
+from utils.clause_ingest import add_clause_episode
+import utils.clause_ingest as _clause_ingest
+
+# retry utilities
+try:
+    from utils.retry import default_retry
+except Exception:
+    # fallback: simple local no-op decorator if utils.retry missing
+    def default_retry(fn=None, *_, **__):
+        if fn is None:
+            def _wrap(f): return f
+            return _wrap
+        return fn
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------
-# Retry decorator
-# ---------------------------------
-
-def _is_retryable_exception(exc: Exception) -> bool:
-    """Naive heuristic to detect retryable rate-limit/quota errors."""
-    if exc is None:
-        return False
-    msg = str(exc).lower()
-    if any(k in msg for k in ("rate limit", "rate_limited", "429", "quota", "resource_exhausted", "insufficient_quota")):
-        return True
-    return False
+# Attempt to import a project-level default persist function if provided
+try:
+    from _default_persist_failure import default_persist_failure as _imported_default_persist_failure
+except Exception:
+    _imported_default_persist_failure = None
 
 
-def retry_async(
-    max_retries: int = 5,
-    initial_delay: float = 0.5,
-    max_delay: float = 60.0,
-    factor: float = 2.0,
-    jitter: float = 0.3,
-):
-    """Async decorator for exponential backoff with jitter.
-
-    Usage:
-        @retry_async(max_retries=6)
-        async def call_api(...):
-            ...
-    """
-    def decorator(fn: Callable[..., Awaitable[Any]]):
-        async def _wrapper(*args, **kwargs):
-            attempt = 0
-            last_exc = None
-            while True:
-                try:
-                    return await fn(*args, **kwargs)
-                except Exception as e:
-                    last_exc = e
-                    attempt += 1
-                    if attempt > max_retries or not _is_retryable_exception(e):
-                        log.debug("No retry: attempt=%s max_retries=%s exc=%s", attempt, max_retries, e)
-                        raise
-                    base = initial_delay * (factor ** (attempt - 1))
-                    sleep_time = min(base, max_delay)
-                    jitter_amount = sleep_time * jitter
-                    sleep_time = max(0.0, sleep_time + random.uniform(-jitter_amount, jitter_amount))
-                    sleep_time = min(max(0.0, sleep_time), max_delay)
-                    log.warning("Retryable error (attempt %d/%d): %s — sleeping %.2fs then retrying...",
-                                attempt, max_retries, e, sleep_time)
-                    await asyncio.sleep(sleep_time)
-        return _wrapper
-    return decorator
-
-
-# ---------------------------------
-# Ingest helper
-# ---------------------------------
-
-# Tunables — adjust for your provider/quota
+# Tunables — environment-configurable
 SEMAPHORE_MAX = int(os.getenv("INGEST_SEMAPHORE_MAX", "1"))
 MAX_CONSECUTIVE_FAILURES = int(os.getenv("INGEST_MAX_CONSECUTIVE_FAILURES", "3"))
 LONG_BACKOFF_SECONDS = int(os.getenv("INGEST_LONG_BACKOFF_SECONDS", str(60 * 5)))
 
 _sem = asyncio.Semaphore(SEMAPHORE_MAX)
 
-# Default per-episode retry decorator instance
-_retry_add_episode = retry_async(max_retries=6, initial_delay=0.5, max_delay=30.0)
-
-async def _default_persist_failure(circular: Any, clauses: List[Any], reason: str) -> None:
-    os.makedirs("failed", exist_ok=True)
-    out_path = os.path.join("failed", f"{getattr(circular, 'id', 'unknown')}.failed.json")
-    payload = {
-        "reason": reason,
-        "circular": circular.to_dict() if hasattr(circular, "to_dict") else dict(circular.__dict__),
-        "clauses": [c.to_dict() if hasattr(c, "to_dict") else dict(c.__dict__) for c in clauses],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    with open(out_path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=2, default=str)
-    log.info("Persisted failed payload to %s", out_path)
-
-
-async def ingest_models_as_episodes(graphiti: Any, circular: Any, clauses: List[Any],
-                                   persist_failure_fn: Callable[[Any, List[Any], str], Awaitable[None]] = None):
-    """Ingest circular metadata + clauses as Graphiti episodes.
+async def ingest_models_as_episodes(
+    graphiti: Any,
+    circular: Any,
+    clauses: List[Any],
+    bulk: bool = False,
+):
+    """
+    Ingest circular metadata + clauses as Graphiti episodes.
 
     Parameters
     - graphiti: Graphiti client instance
-    - circular: Pydantic Circular model instance (has .to_dict())
+    - circular: Pydantic-like Circular model instance
     - clauses: list of Clause model instances
-    - persist_failure_fn: optional async function to persist failures (defaults to writing into failed/)
+    - bulk: whether to attempt a bulk ingestion path (preferred when available)
+    - persist_failure_fn: async function to persist failures (defaults to module/_default_persist_failure)
+    - semaphore: optional asyncio.Semaphore to throttle Graphiti calls (defaults to module semaphore)
+    - retry_decorator: optional retry decorator (defaults to utils.retry.default_retry)
     """
     if persist_failure_fn is None:
-        persist_failure_fn = _default_persist_failure
+        persist_failure_fn = _imported_default_persist_failure
+
+    if semaphore is None:
+        semaphore = _sem
+
+    if retry_decorator is None:
+        retry_decorator = default_retry
 
     meta_text = (
         f"CIRCULAR METADATA:\n"
@@ -137,58 +84,96 @@ async def ingest_models_as_episodes(graphiti: Any, circular: Any, clauses: List[
     n_ok = 0
     n_fail = 0
 
-    # add meta episode
-    @_retry_add_episode
-    async def _add_meta():
-        async with _sem:
-            await graphiti.add_episode(
-                name=f"circular_meta_{getattr(circular, 'id', 'unknown')}",
-                episode_body=meta_text,
-                source=EpisodeType.text,
-                source_description=f"circular metadata {getattr(circular, 'source_file', None)}",
-                reference_time=datetime.now(timezone.utc),
-            )
-
-
+    # Add meta episode (retry via provided decorator)
     try:
-        await _add_meta()
+        async def _add_meta():
+            async with semaphore:
+                await graphiti.add_episode(
+                    name=f"circular_meta_{getattr(circular, 'id', 'unknown')}",
+                    episode_body=meta_text,
+                    source=EpisodeType.text,
+                    source_description=f"circular metadata {getattr(circular, 'source_file', None)}",
+                    reference_time=datetime.now(timezone.utc),
+                )
+
+        wrapped_meta = retry_decorator(_add_meta)
+        await wrapped_meta()
         consecutive_failures = 0
     except Exception as e:
         log.error("Meta episode ingestion failed: %s", e)
         consecutive_failures += 1
         await persist_failure_fn(circular, clauses, f"meta_episode_failed: {e}")
 
-    # ingest clauses
-    for i, cl in enumerate(clauses):
-        # capture loop vars in defaults
-        @_retry_add_episode
-        async def _add_clause(ci=i, clause=cl):
-            async with _sem:
-                print(f"Ingesting {ci+1}/{n_total} chunk")
-                print(f"Adding Episode using _add_clause {getattr(circular, 'id', 'unknown')}_clause_{ci}")
-                await graphiti.add_episode(
-                    name=f"{getattr(circular, 'id', 'unknown')}_clause_{ci}",
-                    episode_body=getattr(clause, 'text', '') or "",
-                    source=EpisodeType.text,
-                    source_description=f"{getattr(circular, 'source_file', None)} chunk {ci}",
-                    reference_time=datetime.now(timezone.utc),
-                )
+    # Bulk path: prefer clause_ingest.add_clause_episode_in_bulk if available
+    bulk_done = False
+    if bulk:
+        bulk_helper = getattr(_clause_ingest, "add_clause_episode_in_bulk", None)
+        if callable(bulk_helper):
+            try:
+                await bulk_helper(graphiti=graphiti, circular=circular, clauses=clauses, sem=semaphore, retry_decorator=retry_decorator)
+                n_ok = n_total
+                bulk_done = True
+                log.info("Bulk helper succeeded for circular %s", getattr(circular, "id", "unknown"))
+            except Exception as e:
+                log.error("Bulk helper failed: %s", e)
+                await persist_failure_fn(circular, clauses, f"bulk_helper_failed: {e}")
+                # fall through to fallback behavior
+        else:
+            # try graphiti.add_episode_bulk (build payloads then call)
+            if hasattr(graphiti, "add_episode_bulk"):
+                try:
+                    # Build payloads compatible with many clients: prefer to send dicts; clause_ingest will create RawEpisode if SDK available.
+                    payloads = []
+                    for i, clause in enumerate(clauses):
+                        name = f"{getattr(circular, 'id', 'unknown')}_clause_{i}"
+                        if hasattr(clause, "to_dict"):
+                            content = json.dumps(clause.to_dict(), default=str, ensure_ascii=False)
+                            source = "json"
+                        else:
+                            content = getattr(clause, "text", "") or ""
+                            source = "text"
+                        payloads.append({
+                            "name": name,
+                            "content": content,
+                            "source": source,
+                            "source_description": f"{getattr(circular, 'source_file', None)} chunk {i}",
+                            "reference_time": datetime.now(timezone.utc).isoformat(),
+                        })
 
-        try:
-            await _add_clause()
-            consecutive_failures = 0
-            n_ok += 1
-            print(f"✅ Ingested {i+1}/{n_total}")
-        except Exception as e:
-            consecutive_failures += 1
-            n_fail += 1
-            log.error("Ingest failed for clause %d of circular %s: %s", i, getattr(circular, 'id', 'unknown'), e)
-            await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
+                    async def _do_bulk():
+                        async with semaphore:
+                            await graphiti.add_episode_bulk(payloads)
 
-            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-                log.warning("Detected %d consecutive failures — pausing for %ds", consecutive_failures, LONG_BACKOFF_SECONDS)
-                await asyncio.sleep(LONG_BACKOFF_SECONDS)
+                    wrapped_bulk = retry_decorator(_do_bulk)
+                    await wrapped_bulk()
+                    n_ok = n_total
+                    bulk_done = True
+                    log.info("Bulk ingestion via graphiti.add_episode_bulk succeeded for circular %s", getattr(circular, "id", "unknown"))
+                except Exception as e:
+                    log.error("graphiti.add_episode_bulk failed: %s", e)
+                    await persist_failure_fn(circular, clauses, f"add_episode_bulk_failed: {e}")
+                    # fall through to sequential ingestion
+            else:
+                log.warning("Bulk requested but no bulk helper and graphiti.add_episode_bulk missing — will use per-clause ingestion.")
+
+    # If bulk not performed or not fully successful, do per-clause sequential ingestion (to preserve circuit-break semantics)
+    if not bulk_done:
+        for i, cl in enumerate(clauses):
+            try:
+                await add_clause_episode(graphiti, circular, cl, i, semaphore, retry_decorator)
                 consecutive_failures = 0
+                n_ok += 1
+                log.info("Ingested %d/%d", n_ok, n_total)
+            except Exception as e:
+                consecutive_failures += 1
+                n_fail += 1
+                log.error("Ingest failed for clause %d of circular %s: %s", i, getattr(circular, "id", "unknown"), e)
+                await persist_failure_fn(circular, clauses, f"clause_{i}_failed: {e}")
 
-    print(f"Done. ✅ {n_ok}/{n_total} ingested, ❌ {n_fail} failed.")
-    log.info("Ingestion attempted for circular %s complete.", getattr(circular, 'id', 'unknown'))
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    log.warning("Detected %d consecutive failures — pausing for %ds", consecutive_failures, LONG_BACKOFF_SECONDS)
+                    await asyncio.sleep(LONG_BACKOFF_SECONDS)
+                    consecutive_failures = 0
+
+    log.info("Done. %d/%d ingested, %d failed.", n_ok, n_total, n_fail)
+    log.info("Ingestion attempted for circular %s complete.", getattr(circular, "id", "unknown"))
