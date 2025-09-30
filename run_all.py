@@ -4,8 +4,6 @@ import asyncio
 import os
 import shutil
 import sys
-# import logging
-# logging.basicConfig(level=logging.DEBUG)
 
 # ensure project folder is on path if running from elsewhere
 PROJECT_DIR = os.path.dirname(__file__)
@@ -37,18 +35,18 @@ def clean_dirs():
                 print(f"Warning: failed to remove {p}: {e}")
 
 
-
 def run_normalization():
     print("1/3 — Running normalization...")
     normalize_main()
     print(" -> normalization complete\n")
 
 
-async def run_mapping(ingest: bool):
+async def run_mapping(ingest: bool, bulk: bool):
     print("2/3 — Running mapping and optional ingestion...")
+    print(f"  -> ingest flag: {ingest}, bulk flag: {bulk}")
 
-    # If ingest requested, do a quick config validation by initializing Graphiti here.
-    if ingest and get_graphiti is not None:
+    # If ingest or bulk requested, do a quick config validation by initializing Graphiti here.
+    if (ingest) and get_graphiti is not None:
         print("  -> Validating Graphiti configuration...")
         try:
             client = get_graphiti()
@@ -58,13 +56,15 @@ async def run_mapping(ingest: bool):
             print("Fix your environment variables (NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD and LLM keys) and retry.")
             raise
 
-    await mapper_main(ingest=ingest)
+    # Delegate to mapper_main; pass both flags so the mapper can choose the bulk or per-clause path.
+    await mapper_main(ingest=ingest, bulk=bulk)
     print(" -> mapping/ingest complete\n")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run full pipeline: normalize -> map -> (optional) ingest")
     parser.add_argument("--ingest", action="store_true", help="Also ingest mapped data into Graphiti (needs env vars)")
+    parser.add_argument("--bulk", action="store_true", help="Use bulk ingestion path inside mapper")
     parser.add_argument("--clean", action="store_true", help="Remove previous normalized data before running")
     args = parser.parse_args()
 
@@ -75,7 +75,7 @@ def main():
         exit()
 
     run_normalization()
-    asyncio.run(run_mapping(ingest=args.ingest))
+    asyncio.run(run_mapping(ingest=args.ingest, bulk=args.bulk))
     print("3/3 — All done ✅")
 
 
