@@ -1,6 +1,5 @@
+# graphiti_ingest_mapper.py
 """
-graphiti_ingest_mapper.py
-
 Map normalized PDF JSON -> Pydantic models (model.py) -> ingest as Graphiti episodes.
 
 This script DOES NOT attempt to call Graphiti's internal node upsert APIs. Instead it
@@ -11,28 +10,37 @@ Usage:
   1) Put normalized JSON files in the `normalized/` directory (output from normalize_pdfs.py).
   2) Configure NEO4J_* and optional LLM env vars (OPENAI_API_KEY or GOOGLE_API_KEY) as needed.
   3) Run: python3 graphiti_ingest_mapper.py --ingest
-
-The file contains three main functions:
- - load_normalized_json(path)
- - map_normalized_to_models(data) -> (Circular, List[Clause])
- - ingest_models_as_episodes(graphiti, circular, clauses)
-
 """
 from __future__ import annotations
+
 import os
 import json
 import argparse
+import inspect
 from utils.graphiti_client import get_graphiti
 from utils.ingest_utils import ingest_models_as_episodes
 from utils.normalisation_utils.map_normalized_to_models import map_normalized_to_models_func
 # Graphiti imports
 from graphiti_core import Graphiti
 
+
 def load_normalized_json(path: str) -> dict:
     with open(path, 'r', encoding='utf-8') as fh:
         return json.load(fh)
 
-async def main(ingest: bool = False):
+
+async def main(ingest: bool = False, bulk: bool = False):
+    """
+    Process normalized files, map to models, and optionally ingest.
+
+    Parameters:
+        ingest: whether to ingest mapped files into Graphiti
+        bulk: when True, indicates a bulk ingestion path should be used (forwarded to ingest_utils)
+    """
+    # If bulk requested, treat as an ingest operation
+    if bulk:
+        ingest = True
+
     # Only process normalized source files, avoid mapped outputs
     files = sorted(
         [
@@ -45,12 +53,12 @@ async def main(ingest: bool = False):
         print("No normalized JSON files found in 'normalized/' — run normalize_pdfs.py first.")
         return
 
-    # If ingest flag set, initialize Graphiti using env creds
+    # If ingest or bulk flag set, initialize Graphiti using env creds
     graphiti = None
     if ingest:
         # Create Graphiti instance (this uses your graphiti_client pattern or direct init)
         try:
-            print(f" Custom Graphiti client created !!");
+            print(" Custom Graphiti client created !!")
             graphiti = get_graphiti()
         except Exception:
             # Fallback to direct init if graphiti_client missing
@@ -95,7 +103,12 @@ async def main(ingest: bool = False):
         if ingest and graphiti:
             try:
                 print('Ingesting into Graphiti...')
-                await ingest_models_as_episodes(graphiti, circ, clauses)
+                # If ingest_models_as_episodes supports `bulk`, forward the kwarg; otherwise fall back
+                sig = inspect.signature(ingest_models_as_episodes)
+                if 'bulk' in sig.parameters:
+                    await ingest_models_as_episodes(graphiti, circ, clauses, bulk=bulk)
+                else:
+                    await ingest_models_as_episodes(graphiti, circ, clauses)
                 print('Ingest complete for', fname)
             except Exception as e:
                 print(f" Ingest failed for {fname}: {e}")
@@ -106,6 +119,7 @@ async def main(ingest: bool = False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--ingest', action='store_true', help='Also ingest mapped content into Graphiti')
+    parser.add_argument('--bulk', action='store_true', help='Use bulk ingestion path (if supported by ingest_utils)')
     args = parser.parse_args()
     import asyncio
-    asyncio.run(main(ingest=args.ingest))
+    asyncio.run(main(ingest=args.ingest, bulk=args.bulk))
