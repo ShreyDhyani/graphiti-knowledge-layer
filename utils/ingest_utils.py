@@ -15,6 +15,7 @@ load_dotenv()
 # clause helpers
 from utils.clause_ingest import add_clause_episode
 import utils.clause_ingest as _clause_ingest
+from utils._default_persist_failure import default_persist_failure as _imported_default_persist_failure
 
 # retry utilities
 try:
@@ -28,13 +29,6 @@ except Exception:
         return fn
 
 log = logging.getLogger(__name__)
-
-# Attempt to import a project-level default persist function if provided
-try:
-    from _default_persist_failure import default_persist_failure as _imported_default_persist_failure
-except Exception:
-    _imported_default_persist_failure = None
-
 
 # Tunables — environment-configurable
 SEMAPHORE_MAX = int(os.getenv("INGEST_SEMAPHORE_MAX", "10"))

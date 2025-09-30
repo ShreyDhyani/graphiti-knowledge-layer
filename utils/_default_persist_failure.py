@@ -1,8 +1,8 @@
+from __future__ import annotations
 import logging
 import os
 import json
 from typing import Any, List
-from __future__ import annotations
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
